@@ -1,0 +1,792 @@
+\
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>A.G.I. Digital Lifeform — Interactive Demo</title>
+<style>
+  :root{
+    --bg0:#06111b;
+    --bg1:#0a1c2a;
+    --line:rgba(110,206,255,.18);
+    --cyan:#74edff;
+    --cyan2:#56c9ff;
+    --text:#cceeff;
+    --muted:#78a4b8;
+  }
+  *{box-sizing:border-box}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#050d15;color:var(--text);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  body{
+    background:
+      radial-gradient(circle at 50% 42%, rgba(49,173,220,.11), transparent 30%),
+      linear-gradient(180deg,var(--bg1),var(--bg0));
+  }
+  #app{position:relative;width:100%;height:100%;touch-action:none;user-select:none}
+  canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+  canvas.dragging{cursor:grabbing}
+
+  .hud{position:absolute;inset:0;pointer-events:none}
+  .corner{position:absolute;width:22px;height:22px;border-color:rgba(140,225,255,.55);border-style:solid}
+  .c1{left:18px;top:18px;border-width:2px 0 0 2px}
+  .c2{right:18px;top:18px;border-width:2px 2px 0 0}
+  .c3{left:18px;bottom:18px;border-width:0 0 2px 2px}
+  .c4{right:18px;bottom:18px;border-width:0 2px 2px 0}
+
+  .topbar{
+    position:absolute;left:30px;right:30px;top:20px;display:flex;justify-content:space-between;align-items:flex-start;
+    font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)
+  }
+  .brand strong{display:block;font-size:20px;letter-spacing:.16em;color:#8bdcff}
+  .brand span{font-size:10px;opacity:.75;letter-spacing:.18em}
+  .title{text-align:right}
+  .title strong{display:block;font-size:20px;color:#8bdcff;letter-spacing:.08em}
+  .title span{font-size:10px;letter-spacing:.14em}
+
+  .panel{
+    position:absolute;left:24px;bottom:24px;min-width:250px;max-width:min(420px,calc(100vw - 48px));
+    padding:12px 14px;border:1px solid rgba(101,204,255,.24);border-radius:12px;
+    background:rgba(5,17,28,.72);backdrop-filter:blur(10px);box-shadow:0 12px 40px rgba(0,0,0,.28);
+    font-size:12px;line-height:1.5;color:#b6d8e7
+  }
+  .panel b{color:#e2f8ff}
+  .state{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 14px var(--cyan)}
+  .hint{color:#7191a3}
+
+  .legend{
+    position:absolute;right:24px;bottom:24px;padding:10px 12px;border:1px solid rgba(101,204,255,.18);
+    border-radius:10px;background:rgba(5,17,28,.56);font-size:11px;color:#7ca8ba;line-height:1.65
+  }
+  .legend kbd{display:inline-block;min-width:54px;text-align:center;padding:1px 6px;margin-right:6px;border:1px solid rgba(130,220,255,.18);border-radius:5px;color:#a8d8e6}
+
+  .tap-ripple{
+    position:absolute;width:18px;height:18px;border:1px solid rgba(125,240,255,.8);border-radius:50%;
+    transform:translate(-50%,-50%);pointer-events:none;animation:ripple .55s ease-out forwards
+  }
+  @keyframes ripple{to{width:130px;height:130px;opacity:0}}
+  @media (max-width:700px){
+    .topbar{left:18px;right:18px;top:14px}
+    .brand strong,.title strong{font-size:15px}
+    .panel{left:16px;right:16px;bottom:16px;max-width:none}
+    .legend{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div class="hud">
+    <div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div>
+
+    <div class="topbar">
+      <div class="brand">
+        <strong>A.G.I.</strong>
+        <span>DIGITAL LIFEFORM</span>
+      </div>
+      <div class="title">
+        <strong>INTERACTIVE PROTOTYPE</strong>
+        <span>TOUCH / DRAG / LONG PRESS</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="state"><span class="dot" id="stateDot"></span><b id="stateName">기본 / 평온</b></div>
+      <div id="stateDesc">당신을 기다리고 있어요.</div>
+      <div class="hint">짧게 누르기 → 반응 · 잡아당기기 → 한쪽만 말랑하게 늘어나요 · 길게 터치 → 해당 위치로 이동</div>
+    </div>
+
+    <div class="legend">
+      <div><kbd>터치</kbd> 톡 건드리면 놀라요</div>
+      <div><kbd>드래그</kbd> 일부만 쭉 늘어나요</div>
+      <div><kbd>길게</kbd> 누르면 그곳으로 이동해요</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const app = document.getElementById('app');
+  const stateName = document.getElementById('stateName');
+  const stateDesc = document.getElementById('stateDesc');
+  const stateDot = document.getElementById('stateDot');
+
+  const TAU = Math.PI * 2;
+  let dpr = Math.max(1, Math.min(2, devicePixelRatio || 1));
+  let W = 0, H = 0;
+
+  const blob = {
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    baseR: 118,
+    r: 118,
+    squashX: 1,
+    squashY: 1,
+    wobble: 0,
+    glow: 1,
+    coreScale: 0.45,
+    coreTarget: 0.45,
+    hue: 195,
+    hueTarget: 195,
+    tilt: 0,
+    tiltTarget: 0,
+    state: 'idle',
+    stateUntil: 0,
+    dragging: false,
+    dragX: 0,
+    dragY: 0,
+    dragGrabOffsetX: 0,
+    dragGrabOffsetY: 0,
+    dragStartX: 0,
+    dragStartY: 0,
+    dragAngle: 0,
+    dragAmount: 0,
+    faceAngle: 0,
+    faceTarget: 0,
+    faceRestAngle: 0,
+    moveFaceStartAngle: 0,
+    membranePhase: Math.random() * Math.PI * 2,
+    membraneEnergy: 0.35,
+    membraneTarget: 0.35,
+    lastX: 0,
+    lastY: 0,
+    moveTargetX: null,
+    moveTargetY: null,
+    longPressFired: false,
+    pointerX: 0,
+    pointerY: 0
+  };
+
+  const states = {
+    idle:    {ko:'기본 / 평온',   desc:'당신을 기다리고 있어요.', hue:195, core:.45, glow:1.00},
+    tap:     {ko:'접촉 / 놀람',   desc:'톡—! 건드렸군요.',     hue:185, core:.58, glow:1.18},
+    happy:   {ko:'호기심 / 기쁨', desc:'재미있어요!',         hue:190, core:.54, glow:1.28},
+    drag:    {ko:'당김 / 변형',   desc:'말랑하게 늘어나요.',   hue:200, core:.40, glow:1.08},
+    move:    {ko:'이동 / 반응',   desc:'그쪽으로 갈게요.',    hue:188, core:.50, glow:1.30},
+    sleepy:  {ko:'졸림 / 휴식',   desc:'조금 쉬고 있어요.',   hue:260, core:.33, glow:.78},
+    alert:   {ko:'경계 / 감지',   desc:'무언가를 감지했어요.', hue:165, core:.48, glow:1.20}
+  };
+
+  function resize(){
+    W = innerWidth; H = innerHeight;
+    dpr = Math.max(1, Math.min(2, devicePixelRatio || 1));
+    canvas.width = Math.round(W*dpr);
+    canvas.height = Math.round(H*dpr);
+    canvas.style.width = W+'px';
+    canvas.style.height = H+'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    blob.baseR = Math.min(118, Math.max(72, Math.min(W,H)*0.16));
+    blob.r = blob.baseR;
+    if(!blob.x){ blob.x=W*.5; blob.y=H*.54; }
+  }
+  addEventListener('resize', resize, {passive:true});
+  resize();
+
+  function setState(name, ms=0){
+    blob.state = name;
+    blob.stateUntil = ms ? performance.now()+ms : 0;
+    const s = states[name] || states.idle;
+    blob.coreTarget = s.core;
+    blob.hueTarget = s.hue;
+    blob.glow = s.glow;
+    stateName.textContent = s.ko;
+    stateDesc.textContent = s.desc;
+    stateDot.style.background = `hsl(${s.hue} 80% 70%)`;
+    stateDot.style.boxShadow = `0 0 14px hsl(${s.hue} 90% 70%)`;
+  }
+
+  let idleSince = performance.now();
+  function resetIdleTimer(){
+    idleSince = performance.now();
+    if(blob.state === 'sleepy') setState('idle');
+  }
+
+  function addRipple(x,y){
+    const el = document.createElement('div');
+    el.className='tap-ripple'; el.style.left=x+'px'; el.style.top=y+'px';
+    app.appendChild(el); setTimeout(()=>el.remove(),600);
+  }
+
+  // --- Pointer interaction ---
+  let activePointerId = null;
+  let downX=0,downY=0,downTime=0;
+  let lastPointerX=0,lastPointerY=0,lastPointerTime=0;
+  let dragVelocityX=0,dragVelocityY=0;
+  let longTimer = null;
+
+  function clearLongTimer(){
+    if(longTimer){ clearTimeout(longTimer); longTimer=null; }
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    activePointerId = e.pointerId;
+    canvas.setPointerCapture(e.pointerId);
+    downX = e.clientX; downY = e.clientY; downTime = performance.now();
+    lastPointerX = e.clientX; lastPointerY = e.clientY; lastPointerTime = downTime;
+    dragVelocityX = 0; dragVelocityY = 0;
+    blob.pointerX=e.clientX; blob.pointerY=e.clientY;
+    const dist = Math.hypot(e.clientX-blob.x,e.clientY-blob.y);
+    // Drag is only armed when the pointer starts on the lifeform. The body stays centered;
+    // only a soft elastic "tongue" on the dragged side stretches toward the pointer.
+    blob.dragging = dist < blob.r*1.15;
+    blob.dragStartX = e.clientX;
+    blob.dragStartY = e.clientY;
+    blob.dragAngle = Math.atan2(e.clientY-blob.y, e.clientX-blob.x);
+    blob.dragAmount = 0;
+    blob.longPressFired = false;
+    clearLongTimer();
+    longTimer = setTimeout(() => {
+      blob.longPressFired = true;
+      blob.dragging = false;
+      blob.moveFaceStartAngle = blob.faceAngle;
+      blob.faceRestAngle = blob.faceAngle;
+      setState('move', 900);
+      blob.vx = blob.vy = 0;
+      blob.moveTargetX = e.clientX;
+      blob.moveTargetY = e.clientY;
+      resetIdleTimer();
+    }, 560);
+    resetIdleTimer();
+  }, {passive:false});
+
+  canvas.addEventListener('pointermove', e => {
+    e.preventDefault();
+    if(activePointerId !== e.pointerId) return;
+    blob.pointerX=e.clientX; blob.pointerY=e.clientY;
+    const dx=e.clientX-downX, dy=e.clientY-downY;
+    const moved = Math.hypot(dx,dy);
+    if(moved>8 && !blob.longPressFired){
+      clearLongTimer();
+    }
+
+    if(blob.dragging){
+      setState('drag');
+      blob.dragX = e.clientX;
+      blob.dragY = e.clientY;
+
+      // Transfer the finger's actual movement into a soft physical impulse.
+      const now = performance.now();
+      const sampleDt = Math.max(8, now - lastPointerTime);
+      const pvx = (e.clientX - lastPointerX) / sampleDt * 16;
+      const pvy = (e.clientY - lastPointerY) / sampleDt * 16;
+
+      // Smooth the sample so tiny touch jitter does not create a violent release.
+      dragVelocityX = dragVelocityX*0.72 + pvx*0.28;
+      dragVelocityY = dragVelocityY*0.72 + pvy*0.28;
+
+      const ax = e.clientX - blob.x;
+      const ay = e.clientY - blob.y;
+      const reach = Math.min(Math.hypot(ax,ay), 150);
+      const ang = Math.atan2(ay,ax);
+      blob.dragAngle = ang;
+      blob.dragAmount = Math.max(0, reach - blob.r*0.78);
+      blob.tiltTarget = clamp(Math.cos(ang) * 0.025, -0.035, 0.035);
+      blob.membraneTarget = clamp(0.45 + blob.dragAmount/110, 0.45, 1.0);
+
+      // The body translation is handled by the soft spring in the physics loop.
+      // Keep only a tiny amount of hand momentum for continuity after release.
+      blob.vx += dragVelocityX * 0.00065;
+      blob.vy += dragVelocityY * 0.00065;
+
+      lastPointerX = e.clientX;
+      lastPointerY = e.clientY;
+      lastPointerTime = now;
+    }
+    if(blob.longPressFired){
+      blob.moveTargetX=e.clientX;
+      blob.moveTargetY=e.clientY;
+    }
+  }, {passive:false});
+
+  canvas.addEventListener('pointerup', e => {
+    e.preventDefault();
+    if(activePointerId !== e.pointerId) return;
+    clearLongTimer();
+    const dt = performance.now()-downTime;
+    const moved = Math.hypot(e.clientX-downX,e.clientY-downY);
+
+    if(blob.longPressFired){
+      setState('happy', 750);
+      blob.vx += (e.clientX-blob.x)*0.01;
+      blob.vy += (e.clientY-blob.y)*0.01;
+      blob.faceTarget = Math.atan2(e.clientY-blob.y, e.clientX-blob.x);
+      addRipple(e.clientX,e.clientY);
+    }else if(blob.dragging || moved>10){
+      setState('happy', 750);
+      blob.membraneTarget = 1.0;
+
+      // Carry the release momentum forward. The character keeps travelling after the
+      // finger leaves instead of freezing at the release point.
+      const now = performance.now();
+      const releaseDt = Math.max(8, now - lastPointerTime);
+      const finalPVx = (e.clientX - lastPointerX) / releaseDt * 16;
+      const finalPVy = (e.clientY - lastPointerY) / releaseDt * 16;
+      const releaseVx = dragVelocityX*0.82 + finalPVx*0.18;
+      const releaseVy = dragVelocityY*0.82 + finalPVy*0.18;
+
+      // Momentum has a comfortable upper bound so it remains playful and controllable.
+      const momentumScale = 0.58;
+      blob.vx = clamp(blob.vx + releaseVx*momentumScale, -4.2, 4.2);
+      blob.vy = clamp(blob.vy + releaseVy*momentumScale, -4.2, 4.2);
+
+      // Slight elastic recoil of the membrane happens visually, while position continues
+      // under the normal friction/physics loop.
+      blob.membraneTarget = 1.05;
+    }else if(dt < 560){
+      setState('tap', 550);
+      addRipple(e.clientX,e.clientY);
+      blob.vx += (e.clientX-blob.x)*0.006;
+      blob.vy += (e.clientY-blob.y)*0.006;
+    }
+    blob.dragging=false;
+    activePointerId=null;
+    resetIdleTimer();
+  }, {passive:false});
+
+  canvas.addEventListener('pointercancel', () => {
+    clearLongTimer();
+    if(blob.dragging){
+      blob.vx = clamp(blob.vx + dragVelocityX*0.35, -4.0, 4.0);
+      blob.vy = clamp(blob.vy + dragVelocityY*0.35, -4.0, 4.0);
+      blob.membraneTarget = 1.0;
+    }
+    blob.dragging=false; activePointerId=null; setState('idle');
+  }, {passive:true});
+
+  // Keyboard fallback for desktop: space = tap, M = move to pointer.
+  addEventListener('keydown', e => {
+    if(e.code==='Space'){
+      e.preventDefault(); setState('tap',550); addRipple(blob.x,blob.y);
+    }
+    if(e.key.toLowerCase()==='m'){
+      setState('move',1000);
+      blob.moveTargetX = W*.75; blob.moveTargetY = H*.55;
+    }
+  });
+
+  // --- Visual helpers ---
+  function lerp(a,b,t){return a+(b-a)*t}
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+  function lerpAngle(a,b,t){
+    const d = ((b-a+Math.PI) % TAU + TAU) % TAU - Math.PI;
+    return a + d*t;
+  }
+  function hexHsl(h){return `hsl(${h} 80% 62%)`}
+  function roundedPath(points){
+    ctx.beginPath();
+    const p0=points[0], p1=points[1];
+    ctx.moveTo((p0.x+p1.x)/2,(p0.y+p1.y)/2);
+    for(let i=1;i<points.length+2;i++){
+      const p=points[i%points.length], n=points[(i+1)%points.length];
+      const mx=(p.x+n.x)/2, my=(p.y+n.y)/2;
+      ctx.quadraticCurveTo(p.x,p.y,mx,my);
+    }
+    ctx.closePath();
+  }
+
+  function drawBlob(t){
+    const s = states[blob.state] || states.idle;
+    blob.hue = lerp(blob.hue,s.hue,.08);
+    blob.coreScale = lerp(blob.coreScale,s.core,.10);
+    blob.r = lerp(blob.r,blob.baseR,.08);
+    blob.squashX = lerp(blob.squashX,1,.12);
+    blob.squashY = lerp(blob.squashY,1,.12);
+    blob.tilt = lerp(blob.tilt,blob.tiltTarget,.12);
+    blob.tiltTarget = 0;
+
+    let moving = false;
+    if(blob.longPressFired && blob.moveTargetX != null){
+      const dx=blob.moveTargetX-blob.x, dy=blob.moveTargetY-blob.y;
+      const d=Math.hypot(dx,dy);
+      if(d>10){
+        moving=true;
+
+        // Slow, cushioned movement.
+        const desiredAngle = Math.atan2(dy, dx);
+        const desiredSpeed = Math.min(2.15, 0.75 + d*0.0035);
+        const accel = 0.0019;
+        blob.vx += Math.cos(desiredAngle) * desiredSpeed * accel * 60;
+        blob.vy += Math.sin(desiredAngle) * desiredSpeed * accel * 60;
+
+        // Cap the actual travel speed so it never becomes too fast.
+        const moveSpeed = Math.hypot(blob.vx, blob.vy);
+        const moveMax = 2.25;
+        if(moveSpeed > moveMax){
+          blob.vx = blob.vx/moveSpeed * moveMax;
+          blob.vy = blob.vy/moveSpeed * moveMax;
+        }
+
+        // Look toward the current travel direction, but do not overwrite the
+        // remembered natural face angle.
+        blob.faceTarget = desiredAngle;
+      } else {
+        blob.vx *= .72; blob.vy *= .72;
+        blob.longPressFired = false;
+        blob.moveTargetX = null; blob.moveTargetY = null;
+
+        // Return from the travel-facing pose to the angle that existed before
+        // movement started, instead of staying tilted toward the destination.
+        blob.faceTarget = blob.faceRestAngle;
+        setState('happy', 650);
+      }
+    } else {
+      const speed=Math.hypot(blob.vx,blob.vy);
+      if(speed>0.85) blob.faceTarget=Math.atan2(blob.vy,blob.vx);
+      else blob.faceTarget = blob.faceRestAngle;
+    }
+    blob.faceAngle = lerpAngle(blob.faceAngle, blob.faceTarget, .12);
+
+    // Membrane energy: high while interacting, then softly settles back to a calm wobble.
+    const currentSpeed = Math.hypot(blob.vx, blob.vy);
+    const interactionEnergy =
+      (blob.dragging ? 1.0 : 0) +
+      (moving ? 0.65 : 0) +
+      (currentSpeed > 1.2 ? 0.25 : 0);
+    blob.membraneTarget = Math.max(blob.membraneTarget*.96, 0.28 + interactionEnergy*0.58);
+    blob.membraneEnergy = lerp(blob.membraneEnergy, blob.membraneTarget, 0.08);
+    blob.membraneTarget = lerp(blob.membraneTarget, 0.28, 0.018);
+
+    // When the user drags the character, the whole body follows slowly like
+    // soft gel with mass. The membrane can stretch ahead of it, but the body
+    // itself never teleports to the pointer.
+    if(blob.dragging){
+      const followX = blob.pointerX - blob.dragGrabOffsetX;
+      const followY = blob.pointerY - blob.dragGrabOffsetY;
+      const followDX = followX - blob.x;
+      const followDY = followY - blob.y;
+
+      // Low spring strength = slow, weighty following motion.
+      const followStrength = 0.00125;
+      blob.vx += clamp(followDX * followStrength, -0.055, 0.055);
+      blob.vy += clamp(followDY * followStrength, -0.055, 0.055);
+
+      // Keep the drag-follow speed deliberately gentle.
+      const dragFollowSpeed = Math.hypot(blob.vx, blob.vy);
+      const dragFollowMax = 1.65;
+      if(dragFollowSpeed > dragFollowMax){
+        blob.vx = blob.vx/dragFollowSpeed * dragFollowMax;
+        blob.vy = blob.vy/dragFollowSpeed * dragFollowMax;
+      }
+    }
+
+    // gentle movement physics, while preserving the silhouette from the character sheet
+    blob.vy += 0.040;
+    // Tiny organic drift when settled, rather than a perfectly still rigid object.
+    if(!blob.dragging && !moving && currentSpeed < 0.35){
+      blob.vx += Math.sin(t*0.00075 + blob.membranePhase)*0.010;
+    }
+    blob.vx *= .952; blob.vy *= .952;
+    blob.x += blob.vx; blob.y += blob.vy;
+    const floor=H*.80;
+    if(blob.y+blob.r>floor){ blob.y=floor-blob.r; blob.vy*=-.38; blob.vx*=.98; }
+    const margin=blob.r*.72;
+    if(blob.x<margin){blob.x=margin;blob.vx=Math.abs(blob.vx)*.62}
+    if(blob.x>W-margin){blob.x=W-margin;blob.vx=-Math.abs(blob.vx)*.62}
+    if(blob.y<margin+30){blob.y=margin+30;blob.vy=Math.abs(blob.vy)*.45}
+
+    // Overall scale stays close to the reference sheet. Deformation is mostly handled
+    // by the membrane contour, with only a very small global squash/stretch.
+    const speed = Math.hypot(blob.vx, blob.vy);
+    const bob = Math.sin(t*.0022)*2.4 + Math.sin(t*.0045)*1.0;
+    const idleBreath = 1 + Math.sin(t*.00155)*0.010;
+    const pulse = idleBreath + Math.sin(t*.005)*0.020*(blob.state==='tap'?3:1);
+
+    // Keep the main silhouette essentially circular.
+    const rx=blob.r*blob.squashX*pulse;
+    const ry=blob.r*blob.squashY*pulse;
+
+    // Ground glow
+    const shadow = ctx.createRadialGradient(blob.x, floor+4, 6, blob.x, floor+7, blob.r*1.6);
+    shadow.addColorStop(0,`hsla(${blob.hue},90%,70%,.20)`);
+    shadow.addColorStop(1,`hsla(${blob.hue},90%,60%,0)`);
+    ctx.fillStyle=shadow;
+    ctx.beginPath();ctx.ellipse(blob.x,floor+6,blob.r*1.4,16,0,0,TAU);ctx.fill();
+
+    ctx.save();
+    ctx.translate(blob.x,blob.y+bob);
+    ctx.rotate(blob.tilt);
+
+    // Character-sheet silhouette + soft jelly deformation.
+    // The membrane is never perfectly rigid: it breathes at rest, ripples while moving,
+    // and yields locally when dragged, while keeping the central core visually anchored.
+    function bodyPath(scaleX=1, scaleY=1, offsetX=0, offsetY=0){
+      const rX = rx*scaleX, rY = ry*scaleY;
+      const count = 28;
+      const pts = [];
+      const speed = Math.hypot(blob.vx, blob.vy);
+      const velAngle = speed > 0.18 ? Math.atan2(blob.vy, blob.vx) : blob.faceAngle;
+      const moveAmount = clamp(speed / 2.35, 0, 1);
+      const dragAmountN = blob.dragging ? clamp(blob.dragAmount / 110, 0, 1) : 0;
+      const dragAngle = blob.dragAngle || 0;
+
+      for(let i=0;i<count;i++){
+        const a = i*TAU/count;
+        const ca = Math.cos(a), sa = Math.sin(a);
+
+        // Reference-sheet proportions: rounded top, fuller lower body, soft scalloped base.
+        let shape = 1
+          + 0.020*Math.sin(a*3.0 + 0.3)
+          + 0.014*Math.sin(a*5.0 - 0.7)
+          + 0.032*Math.max(0, sa);
+
+        // Gentle breathing / wobble even while idle.
+        const waveAmp = 0.55 + blob.membraneEnergy;
+        const idleWave =
+          waveAmp*0.016*Math.sin(t*0.00175 + a*2.15 + blob.membranePhase) +
+          waveAmp*0.010*Math.sin(t*0.0027 - a*3.6 + blob.membranePhase*0.55);
+
+        // During movement the body stays round. Only a narrow trailing sector
+        // stretches into a soft tail behind the travel direction.
+        let travelWave = 0;
+        if(moveAmount > 0.03){
+          const align = ca*Math.cos(velAngle) + sa*Math.sin(velAngle);
+
+          // Opposite of travel = trailing side. Higher exponent keeps the
+          // deformation narrow instead of making the whole rear side wide.
+          const trailing = Math.max(0, -align);
+          const tailCore = Math.pow(trailing, 9.0);
+          const tailShoulder = Math.pow(trailing, 3.2);
+
+          const tailLength = 0.42 * Math.min(moveAmount, 0.72);
+          travelWave += tailLength * (0.18*tailShoulder + 0.82*tailCore);
+
+          // A subtle traveling ripple follows the tail.
+          travelWave += 0.012*moveAmount*
+            Math.sin(t*0.010 + a*6.0 - velAngle*2.0) * tailShoulder;
+        }
+
+        // Dragging deforms this SAME membrane path. No extra lobe/layer is drawn.
+        // Only the sector closest to the pointer stretches; the opposite side subtly
+        // compresses so the body still reads as one continuous jelly surface.
+        let dragWave = 0;
+        if(dragAmountN > 0.01){
+          const align = ca*Math.cos(dragAngle) + sa*Math.sin(dragAngle);
+          const forward = Math.max(0, align);
+          const backward = Math.max(0, -align);
+
+          const localStretch = Math.pow(forward, 3.4);
+          const localPinch = Math.pow(backward, 2.2);
+
+          // The membrane itself reaches toward the finger.
+          dragWave += 0.54*dragAmountN*localStretch;
+          dragWave -= 0.07*dragAmountN*localPinch;
+
+          // Soft waves travel around the shell while it is stretched.
+          dragWave += 0.028*dragAmountN*
+            Math.sin(t*0.012 + a*5.5 - dragAngle*2.0) * (0.35 + 0.65*localStretch);
+
+          // A tiny sideways shear keeps the deformation organic rather than conical.
+          const tangent = -ca*Math.sin(dragAngle) + sa*Math.cos(dragAngle);
+          dragWave += 0.035*dragAmountN*tangent*forward;
+        }
+
+        // A little squish from contact with the "floor" and vertical motion.
+        const landingSquish = Math.max(0, (blob.y + ry) - (H*0.80 - 2));
+        const floorWave = landingSquish > 0 ? 0.020*clamp(landingSquish/18,0,1)*Math.max(0,sa) : 0;
+
+        const rr = shape + idleWave + travelWave + dragWave + floorWave;
+        pts.push({x: offsetX + ca*rX*rr, y: offsetY + sa*rY*rr});
+      }
+
+      ctx.beginPath();
+      for(let i=0;i<pts.length;i++){
+        const p = pts[i];
+        const n = pts[(i+1)%pts.length];
+        const mx = (p.x+n.x)/2, my = (p.y+n.y)/2;
+        if(i===0) ctx.moveTo(mx,my);
+        ctx.quadraticCurveTo(p.x,p.y,mx,my);
+      }
+      ctx.closePath();
+    }
+
+    // Main body — naturally deforming, but the core remains centered.
+    bodyPath();
+    const body=ctx.createRadialGradient(-rx*.30,-ry*.36,5,rx*.20,ry*.30,Math.max(rx,ry)*1.2);
+    body.addColorStop(0,`hsla(${blob.hue},96%,76%,.48)`);
+    body.addColorStop(.30,`hsla(${blob.hue+5},88%,48%,.52)`);
+    body.addColorStop(.72,`hsla(${blob.hue+10},80%,27%,.76)`);
+    body.addColorStop(1,`hsla(${blob.hue+16},82%,13%,.92)`);
+    ctx.fillStyle=body;
+    ctx.shadowColor=`hsla(${blob.hue},95%,62%,.30)`;
+    ctx.shadowBlur=24;
+    ctx.fill();
+    ctx.shadowBlur=0;
+
+    // Dragging is already represented by the membrane contour above.
+    // No separate stretched object or layer is rendered.
+
+    // Glass highlight to match the reference sheet
+    const sheen=ctx.createLinearGradient(-rx*.7,-ry*.75,rx*.30,ry*.10);
+    sheen.addColorStop(0,'rgba(255,255,255,.28)');
+    sheen.addColorStop(.18,'rgba(160,237,255,.10)');
+    sheen.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=sheen;
+    ctx.beginPath();
+    ctx.ellipse(-rx*.36,-ry*.42,rx*.24,ry*.16,-.55,0,TAU);
+    ctx.fill();
+
+    // Central luminous core — anchored, circular and prominent.
+    const cr=rx*blob.coreScale;
+    const coreGlow=ctx.createRadialGradient(0,0,cr*.08,0,0,cr*2.35);
+    coreGlow.addColorStop(0,`hsla(${blob.hue},100%,92%,.98)`);
+    coreGlow.addColorStop(.20,`hsla(${blob.hue},100%,78%,.76)`);
+    coreGlow.addColorStop(.55,`hsla(${blob.hue},100%,64%,.18)`);
+    coreGlow.addColorStop(1,`hsla(${blob.hue},100%,60%,0)`);
+    ctx.fillStyle=coreGlow;ctx.beginPath();ctx.arc(0,0,cr*2.25,0,TAU);ctx.fill();
+    const core=ctx.createRadialGradient(-cr*.28,-cr*.33,1,0,0,cr);
+    core.addColorStop(0,'#f4ffff');
+    core.addColorStop(.34,`hsl(${blob.hue} 100% 88%)`);
+    core.addColorStop(1,`hsl(${blob.hue} 92% 62%)`);
+    ctx.fillStyle=core;ctx.beginPath();ctx.arc(0,0,cr,0,TAU);ctx.fill();
+
+    drawFace(rx,ry,t);
+    ctx.restore();
+
+    if(blob.stateUntil && performance.now()>blob.stateUntil){
+      blob.stateUntil=0; setState('idle');
+    }
+    if(!blob.dragging && !moving && performance.now()-idleSince>7000 && blob.state==='idle'){
+      setState('sleepy');
+    }
+  }
+
+  function drawFace(rx,ry,t){
+    const eyeYBase=-ry*.27;
+    const eyeX=rx*.27;
+    const blink=(Math.sin(t*.0019)>0.985) ? 0.08 : 1;
+    let eyeScale=1;
+    let brow=false;
+    let mouth='neutral';
+
+    if(blob.state==='tap'){eyeScale=1.35; mouth='o'}
+    if(blob.state==='happy'){eyeScale=.84; mouth='smile'}
+    if(blob.state==='drag'){eyeScale=1.0; mouth='o'}
+    if(blob.state==='move'){eyeScale=.92; mouth='smile'}
+    if(blob.state==='sleepy'){eyeScale=.9; mouth='sleepy'}
+    if(blob.state==='alert'){eyeScale=1.25; brow=true; mouth='flat'}
+
+    // While travelling, the facial cluster itself leans/offsets toward the
+    // travel direction. This is different from simply rotating the whole body:
+    // the eyes and mouth move to the front side of the membrane.
+    const movingSpeed = Math.hypot(blob.vx, blob.vy);
+    const isTravelling = blob.state==='move' || movingSpeed > 0.95;
+    const travelAngle = movingSpeed > 0.12
+      ? Math.atan2(blob.vy, blob.vx)
+      : blob.faceAngle;
+
+    // Use the character's local x/y basis for a direction-aware facial offset.
+    // The offset is deliberately small so the circular body and central core
+    // remain faithful to the character sheet.
+    const faceStrength = isTravelling
+      ? clamp(movingSpeed/2.25, 0, 1)
+      : 0;
+
+    const localDx = Math.cos(travelAngle) * rx * 0.095 * faceStrength;
+    const localDy = Math.sin(travelAngle) * ry * 0.060 * faceStrength;
+
+    // Add a tiny look-ahead asymmetry so the face appears to lead the movement,
+    // but avoid locking it to the destination after arrival.
+    const lead = isTravelling ? 1 : 0;
+    const lookAheadX = Math.cos(travelAngle) * rx * 0.018 * lead;
+    const lookAheadY = Math.sin(travelAngle) * ry * 0.012 * lead;
+
+    const fx = localDx + lookAheadX;
+    const fy = localDy + lookAheadY;
+    const eyeY = eyeYBase + fy;
+
+    const drawEye=(x,y,side)=>{
+      ctx.save();
+      ctx.translate(x+fx,y);
+      ctx.scale(1, blink*eyeScale);
+      const g=ctx.createRadialGradient(0,0,0,0,0,rx*.10);
+      g.addColorStop(0,'rgba(255,255,255,.98)');
+      g.addColorStop(1,'rgba(210,250,255,.65)');
+      ctx.fillStyle=g;
+      ctx.beginPath();
+      ctx.arc(0,0,rx*.09,0,TAU);
+      ctx.fill();
+
+      if(blob.state==='move' && faceStrength>.2){
+        // A tiny front-edge glint reinforces which way the character is looking.
+        const gx = Math.cos(travelAngle) * rx*.035;
+        const gy = Math.sin(travelAngle) * ry*.022;
+        ctx.fillStyle='rgba(255,255,255,.55)';
+        ctx.beginPath();
+        ctx.arc(gx,gy,rx*.025,0,TAU);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      if(brow){
+        ctx.save();
+        ctx.translate(x+fx,y);
+        ctx.rotate(travelAngle*0.035);
+        ctx.strokeStyle='rgba(255,255,255,.82)';
+        ctx.lineWidth=Math.max(2,rx*.018);
+        ctx.lineCap='round';
+        ctx.beginPath();
+        ctx.moveTo(-rx*.09,-ry*.11);
+        ctx.lineTo(side*rx*.05,-ry*.16);
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    drawEye(-eyeX,eyeY,-1);
+    drawEye(eyeX,eyeY,1);
+
+    ctx.save();
+    ctx.translate(fx, fy);
+    // During travel, the mouth also moves slightly toward the direction of travel.
+    // It stays attached to the same facial cluster as the eyes.
+    const mouthLean = isTravelling ? travelAngle*0.045*faceStrength : 0;
+    ctx.rotate(mouthLean);
+
+    ctx.strokeStyle='rgba(240,255,255,.9)';
+    ctx.fillStyle='rgba(245,255,255,.95)';
+    ctx.lineWidth=Math.max(2,rx*.018);
+    ctx.lineCap='round';
+
+    if(mouth==='o'){
+      ctx.beginPath();ctx.arc(0,ry*.03,rx*.07,0,TAU);ctx.stroke();
+    }else if(mouth==='smile'){
+      ctx.beginPath();ctx.arc(0,-ry*.01,rx*.12,0.15*Math.PI,0.85*Math.PI);ctx.stroke();
+    }else if(mouth==='sleepy'){
+      ctx.beginPath();ctx.arc(0,ry*.02,rx*.09,0.2*Math.PI,0.8*Math.PI);ctx.stroke();
+    }else if(mouth==='flat'){
+      ctx.beginPath();ctx.moveTo(-rx*.07,ry*.03);ctx.lineTo(rx*.07,ry*.03);ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawBackground(t){
+    ctx.clearRect(0,0,W,H);
+    // grid
+    ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(91,184,225,.055)';
+    const gap=44;
+    for(let x=0;x<W;x+=gap){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=gap){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    // tiny particles
+    for(let i=0;i<26;i++){
+      const px=(i*97.3)%W, py=(i*53.7)%H;
+      const a=.10+.06*Math.sin(t*.0008+i);
+      ctx.fillStyle=`rgba(121,219,255,${a})`;
+      ctx.fillRect(px,py,1.5,1.5);
+    }
+  }
+
+  function frame(t){
+    drawBackground(t);
+    drawBlob(t);
+    requestAnimationFrame(frame);
+  }
+  setState('idle');
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
